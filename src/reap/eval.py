@@ -108,7 +108,7 @@ def start_server(model_name, model_args, eval_args, seed, log_file, port):
     hf_overrides = {}
     max_num_seqs = 32
     max_model_len = 32768
-    gpu_memory_utilization = 0.90
+    gpu_memory_utilization = 0.85  # Reduced from 0.90 to allow headroom after pruning cleanup
     if model_args.num_experts_per_tok_override is not None:
         logger.info(
             f"Overriding number of experts per token to {model_args.num_experts_per_tok_override}"

@@ -1,69 +1,76 @@
-# Base image
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
+# Base image - using NVIDIA vLLM image for GB10/Blackwell compatibility
+FROM nvcr.io/nvidia/vllm:25.11-py3
 
 # Prevents prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies including git, sudo, and add deadsnakes PPA for Python 3.12
+# Install additional system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
     git \
-    software-properties-common \
     sudo \
     ssh \
     tmux \
     vim \
     htop \
     unzip \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update && apt-get install -y --no-install-recommends \
-    python3.12 \
-    python3.12-dev \
-    python3.12-venv \
-    python3-pip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv system-wide and create python symlink
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mv /root/.local/bin/uv /usr/local/bin/uv && \
-    ln -s /usr/bin/python3.12 /usr/bin/python
-
-# Add build arguments for user and group IDs
-ARG USER_ID=1000
-ARG GROUP_ID=1000
-
-# Create a non-root user 'dev' and add to sudo group
-RUN groupadd -g $GROUP_ID dev && \
-    useradd -u $USER_ID -g $GROUP_ID -s /bin/bash -m dev && \
-    adduser dev sudo && \
-    echo "dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
-    chown -R dev:dev /home/dev
+# Install uv for dependency management
+RUN pip install uv
 
 # Set up the working directory
 WORKDIR /app
 
-# Copy project files
+# Copy the entire project
 COPY . .
 
-RUN chown -R dev:dev /app
+# Set fake versions for setuptools_scm packages (they need git history for versioning)
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EVALPLUS=0.1.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LIVECODEBENCH=0.1.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CRFM_HELM=0.5.7
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_EVALSCOPE=2.0.0
 
-# Create a cache directory for uv inside /app and set ownership
-RUN mkdir -p /app/.uv_cache && chown -R dev:dev /app/.uv_cache
+# Install dependencies during build - self-contained and reproducible
+RUN pip install --no-deps --editable third-party/evalplus && \
+    pip install --no-deps --editable third-party/LiveCodeBench && \
+    pip install --no-deps --editable third-party/helm && \
+    pip install --no-deps --editable third-party/evalscope && \
+    pip install --no-deps --editable . && \
+    pip install \
+    accelerate \
+    lm-eval \
+    seaborn \
+    matplotlib \
+    python-dotenv \
+    jupyter \
+    trl \
+    hatchling \
+    wandb \
+    umap-learn \
+    fire \
+    termcolor \
+    multipledispatch \
+    appdirs \
+    tempdir \
+    wget \
+    cohere \
+    google-genai \
+    google-generativeai \
+    mistralai \
+    pebble \
+    together \
+    anthropic \
+    boto3 \
+    psutil \
+    tree-sitter \
+    tree-sitter-python
+
+# Create a cache directory for uv
+RUN mkdir -p /app/.uv_cache
 
 # Set UV_CACHE_DIR environment variable
 ENV UV_CACHE_DIR="/app/.uv_cache"
-
-# Switch to the new user
-USER dev
-
-# Set the entrypoint to run our setup script via bash
-# This avoids host filesystem permission issues with the script itself.
-ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]
-
-# Add venv to PATH for interactive shells
-ENV PATH="/app/.venv/bin:/home/dev/.local/bin:${PATH}"
 
 # Default command to run if no other command is specified
 CMD ["/bin/bash"]

@@ -24,9 +24,11 @@ services:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [gpu]
+              capabilities: [ gpu ]
     env_file:
       - .env
     environment:
       - NVIDIA_DRIVER_CAPABILITIES=all
+      - HF_HOME=/home/dev/.cache/huggingface
+      - HF_HUB_CACHE=/home/dev/.cache/huggingface/hub
     network_mode: host

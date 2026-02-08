@@ -1,0 +1,6 @@
+# Constraint file to prevent pip from replacing NVIDIA base image packages
+# These versions are from nvcr.io/nvidia/vllm:25.11-py3
+torch==2.10.0a0+b558c986e8.nv25.11
+vllm==0.11.0+582e4e37.nv25.11
+# Keep these at their base image versions
+transformers>=4.43.0

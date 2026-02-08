@@ -253,12 +253,20 @@ def main():
     model_name = patched_model_map(model_args.model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     # load model
+    # Explicitly set max_memory for GB10's 128GB unified memory (accelerate misdetects it)
+    import torch
+    if torch.cuda.is_available():
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory
+        max_memory = {0: int(gpu_mem * 0.8), "cpu": 0}  # Use 80% of GPU, avoid CPU offload
+    else:
+        max_memory = None
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         device_map="auto",
         torch_dtype="auto",
         trust_remote_code=True,
         local_files_only=True,
+        max_memory=max_memory,
     )
     # record activations or load previously recorded activations
     logger.info(
@@ -360,12 +368,40 @@ def main():
 
     # eval
     if reap_args.do_eval:
+        # Improved memory cleanup to ensure GPU is fully released before vLLM starts
+        logger.info("Starting GPU memory cleanup before evaluation...")
+        
+        # Remove hooks first
         remove_hook_from_module(model, recurse=True)
-        model.to("cpu")
+        
+        # Synchronize CUDA before moving model
+        torch.cuda.synchronize()
+        
+        # Move model to CPU and delete
+        model.cpu()
         del model
+        
+        # Clear observer data
         del observer_data
-        torch.cuda.empty_cache()
+        
+        # First GC pass to release Python references
         gc.collect()
+        
+        # Synchronize and clear CUDA cache
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        
+        # Second GC pass for any remaining references
+        gc.collect()
+        
+        # Brief sleep to allow memory subsystem to stabilize
+        time.sleep(2)
+        
+        # Log memory state after cleanup
+        allocated = torch.cuda.memory_allocated() / 1e9
+        reserved = torch.cuda.memory_reserved() / 1e9
+        logger.info(f"GPU memory after cleanup: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+        
         model_args.model_name = pruned_model_dir
         run_evaluate(model_args, pruned_model_dir / "eval", eval_args, reap_args.seed)
 
