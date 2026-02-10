@@ -66,6 +66,12 @@ RUN pip install --no-deps --editable third-party/evalplus && \
     tree-sitter \
     tree-sitter-python
 
+# Unsloth + BNB 4-bit support for GptOss models
+# datasets must be pinned to 4.3.0 — unsloth crashes with 4.5.0
+# hf_transfer required because base image sets HF_HUB_ENABLE_HF_TRANSFER=1
+RUN pip install --no-deps unsloth==2026.1.4 unsloth_zoo==2026.1.4 bitsandbytes==0.49.1 peft==0.18.1 hf_transfer && \
+    pip install datasets==4.3.0
+
 # Create a cache directory for uv
 RUN mkdir -p /app/.uv_cache
 

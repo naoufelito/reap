@@ -354,7 +354,24 @@ class MoETransformerObserver(BaseTransformerObserver):
 
             if self.hook_config.fused_experts:
                 _, router_scores = output  # (num_experts, total_tokens)
-                router_logits = module.router(flat_input)  # (total_tokens, num_experts)
+                # Get raw router logits for expert selection.
+                # Some routers (e.g. GptOssTopKRouter) return (scores, indices) tuples
+                # instead of raw logits. We try F.linear() first when possible.
+                router = module.router
+                # Find the weight parameter — may be on router directly or on a sub-module
+                _w = getattr(router, 'weight', None)
+                if _w is None and hasattr(router, 'linear'):
+                    _w = getattr(router.linear, 'weight', None)
+                if _w is not None and isinstance(_w, (torch.Tensor, torch.nn.Parameter)):
+                    _b = getattr(router, 'bias', None)
+                    if _b is None and hasattr(router, 'linear'):
+                        _b = getattr(router.linear, 'bias', None)
+                    router_logits = F.linear(flat_input, _w, _b)
+                else:
+                    router_logits = router(flat_input)
+                    # Handle routers that return tuples (scores, indices)
+                    if isinstance(router_logits, tuple):
+                        router_logits = router_logits[0]
                 _, selected_experts = torch.topk(router_logits, top_k, dim=-1)
                 selected_experts = selected_experts.to(device)
                 router_indices = (
@@ -368,10 +385,43 @@ class MoETransformerObserver(BaseTransformerObserver):
                     dim=0,
                     index=router_indices,
                 ).to(device)
-                # we do not apply router_scores
-                # record unweighted activations for all experts
-                routed_out = module.experts(routed_in)
-                activations = routed_out.view(num_experts, *flat_input.shape)
+                # Compute unweighted per-expert activations.
+                # We cannot call module.experts(routed_in) directly because
+                # GptOssExperts.forward() requires (hidden_states, router_indices, routing_weights).
+                # Instead, compute each expert's output individually.
+                experts = module.experts
+                if hasattr(experts, 'gate_up_projs'):
+                    # Unsloth-patched GptOssExperts: ModuleList of nn.Linear layers
+                    alpha = getattr(experts, 'alpha', 1.0)
+                    limit = getattr(experts, 'limit', float('inf'))
+                    for idx in range(num_experts):
+                        gate_up = experts.gate_up_projs[idx](flat_input)
+                        gate, up = gate_up[..., ::2], gate_up[..., 1::2]
+                        gate = gate.clamp(min=None, max=limit)
+                        up = up.clamp(min=-limit, max=limit)
+                        glu = gate * torch.sigmoid(gate * alpha)
+                        gated = (up + 1) * glu
+                        activations[idx] = experts.down_projs[idx](gated).to(device)
+                elif hasattr(experts, 'gate_up_proj') and isinstance(experts.gate_up_proj, (torch.Tensor, torch.nn.Parameter)):
+                    # Original HF GptOssExperts: batched parameter tensors
+                    alpha = getattr(experts, 'alpha', 1.0)
+                    limit = getattr(experts, 'limit', float('inf'))
+                    _in = flat_input.unsqueeze(0).expand(num_experts, -1, -1)
+                    gate_up = torch.bmm(_in, experts.gate_up_proj)
+                    if hasattr(experts, 'gate_up_proj_bias'):
+                        gate_up = gate_up + experts.gate_up_proj_bias[..., None, :]
+                    gate, up = gate_up[..., ::2], gate_up[..., 1::2]
+                    gate = gate.clamp(min=None, max=limit)
+                    up = up.clamp(min=-limit, max=limit)
+                    glu = gate * torch.sigmoid(gate * alpha)
+                    out = torch.bmm(((up + 1) * glu), experts.down_proj)
+                    if hasattr(experts, 'down_proj_bias'):
+                        out = out + experts.down_proj_bias[..., None, :]
+                    activations = out.to(device)
+                else:
+                    # Fallback: other fused expert architectures (e.g. Llama4TextExperts)
+                    routed_out = experts(routed_in)
+                    activations = routed_out.view(num_experts, *flat_input.shape)
 
             else:  # loop based MoE execution
                 # ernie returns combined_output, combine_weights, router_loss, gate_logits
@@ -614,6 +664,14 @@ class Glm44MoEObserverHookConfig(MoETransformerObserverConfig):
     fused_experts: bool = False
 
 
+@dataclass
+class GptOssMoEObserverHookConfig(MoETransformerObserverConfig):
+    module_class_name_to_hook_regex: Optional[str] = "GptOssMLP"
+    num_experts_attr_name: str = "router.num_experts"
+    top_k_attr_name: str = "router.top_k"
+    fused_experts: bool = True
+
+
 OBSERVER_CONFIG_REGISTRY = {
     "Qwen3MoeForCausalLM": Qwen3MoEObserverHookConfig,
     "NonUniformQwen3MoeForCausalLM": Qwen3MoEObserverHookConfig,
@@ -623,4 +681,5 @@ OBSERVER_CONFIG_REGISTRY = {
     "Ernie4_5_MoEForCausalLM": Ernie4_5MoEObserverHookConfig,
     "Ernie4_5_MoeForCausalLM": Ernie4_5MoEObserverHookConfig,
     "Glm4MoeForCausalLM": Glm44MoEObserverHookConfig,
+    "GptOssForCausalLM": GptOssMoEObserverHookConfig,
 }

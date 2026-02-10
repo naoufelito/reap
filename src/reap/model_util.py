@@ -104,6 +104,17 @@ MODEL_ATTRS = {
         "num_experts": "num_experts",
         "num_experts_per_tok": "num_experts_per_tok",
     },
+    "GptOssForCausalLM": {
+        "moe_block": "mlp",
+        "gate_proj": "gate_up_proj",
+        "up_proj": "gate_up_proj",
+        "down_proj": "down_proj",
+        "experts": "experts",
+        "fused": True,
+        "router": "router",
+        "num_experts": "num_local_experts",
+        "num_experts_per_tok": "num_experts_per_tok",
+    },
     "Glm4MoeForCausalLM": {
         "moe_block": "mlp",
         "gate_proj": "gate_proj",
