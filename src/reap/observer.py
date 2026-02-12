@@ -353,25 +353,22 @@ class MoETransformerObserver(BaseTransformerObserver):
             activations = torch.zeros((num_experts, *flat_input.shape), device=device)
 
             if self.hook_config.fused_experts:
-                _, router_scores = output  # (total_tokens, num_experts)
-                # Get raw router logits for expert selection.
-                # Some routers (e.g. GptOssTopKRouter) return (scores, indices) tuples
-                # instead of raw logits. We try F.linear() first when possible.
+                # Get raw router logits via F.linear to avoid calling
+                # router.forward(), which may return already-softmaxed scores.
                 router = module.router
-                # Find the weight parameter — may be on router directly or on a sub-module
                 _w = getattr(router, 'weight', None)
                 if _w is None and hasattr(router, 'linear'):
                     _w = getattr(router.linear, 'weight', None)
-                if _w is not None and isinstance(_w, (torch.Tensor, torch.nn.Parameter)):
-                    _b = getattr(router, 'bias', None)
-                    if _b is None and hasattr(router, 'linear'):
-                        _b = getattr(router.linear, 'bias', None)
-                    router_logits = F.linear(flat_input, _w, _b)
-                else:
-                    router_logits = router(flat_input)
-                    # Handle routers that return tuples (scores, indices)
-                    if isinstance(router_logits, tuple):
-                        router_logits = router_logits[0]
+                if _w is None or not isinstance(_w, (torch.Tensor, torch.nn.Parameter)):
+                    raise AttributeError(
+                        f"Router {type(router).__name__} has no accessible weight "
+                        "parameter (checked router.weight and router.linear.weight). "
+                        "Cannot compute raw router logits for fused experts."
+                    )
+                _b = getattr(router, 'bias', None)
+                if _b is None and hasattr(router, 'linear'):
+                    _b = getattr(router.linear, 'bias', None)
+                router_logits = F.linear(flat_input, _w, _b)
                 _, selected_experts = torch.topk(router_logits, top_k, dim=-1)
                 selected_experts = selected_experts.to(device)
                 # Compute unweighted per-expert activations.
