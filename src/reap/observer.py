@@ -417,11 +417,11 @@ class MoETransformerObserver(BaseTransformerObserver):
                     out = torch.bmm(((up + 1) * glu), experts.down_proj)
                     if hasattr(experts, 'down_proj_bias'):
                         out = out + experts.down_proj_bias[..., None, :]
-                    activations = out.to(device)
+                    activations.copy_(out)
                 else:
                     # Fallback: other fused expert architectures (e.g. Llama4TextExperts)
                     routed_out = experts(routed_in)
-                    activations = routed_out.view(num_experts, *flat_input.shape)
+                    activations.copy_(routed_out.view(num_experts, *flat_input.shape))
 
             else:  # loop based MoE execution
                 # ernie returns combined_output, combine_weights, router_loss, gate_logits
