@@ -353,7 +353,7 @@ class MoETransformerObserver(BaseTransformerObserver):
             activations = torch.zeros((num_experts, *flat_input.shape), device=device)
 
             if self.hook_config.fused_experts:
-                _, router_scores = output  # (num_experts, total_tokens)
+                _, router_scores = output  # (total_tokens, num_experts)
                 # Get raw router logits for expert selection.
                 # Some routers (e.g. GptOssTopKRouter) return (scores, indices) tuples
                 # instead of raw logits. We try F.linear() first when possible.
@@ -374,21 +374,7 @@ class MoETransformerObserver(BaseTransformerObserver):
                         router_logits = router_logits[0]
                 _, selected_experts = torch.topk(router_logits, top_k, dim=-1)
                 selected_experts = selected_experts.to(device)
-                router_indices = (
-                    torch.arange(batch_size * sequence_length, device=device)
-                    .view(1, -1)
-                    .expand(router_scores.size(0), -1)
-                )
-                router_indices = router_indices.reshape(-1, 1).expand(-1, hidden_dim)
-                routed_in = torch.gather(
-                    input=flat_input,
-                    dim=0,
-                    index=router_indices,
-                ).to(device)
                 # Compute unweighted per-expert activations.
-                # We cannot call module.experts(routed_in) directly because
-                # GptOssExperts.forward() requires (hidden_states, router_indices, routing_weights).
-                # Instead, compute each expert's output individually.
                 experts = module.experts
                 if hasattr(experts, 'gate_up_projs'):
                     # Unsloth-patched GptOssExperts: ModuleList of nn.Linear layers
@@ -420,6 +406,8 @@ class MoETransformerObserver(BaseTransformerObserver):
                     activations.copy_(out)
                 else:
                     # Fallback: other fused expert architectures (e.g. Llama4TextExperts)
+                    # Build routed_in: repeat flat_input once per expert
+                    routed_in = flat_input.repeat(num_experts, 1)
                     routed_out = experts(routed_in)
                     activations.copy_(routed_out.view(num_experts, *flat_input.shape))
 
