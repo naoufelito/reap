@@ -64,7 +64,8 @@ RUN pip install --no-deps --editable third-party/evalplus && \
     boto3 \
     psutil \
     tree-sitter \
-    tree-sitter-python
+    tree-sitter-python \
+    kernels
 
 # Unsloth + BNB 4-bit support for GptOss models
 # datasets must be pinned to 4.3.0 — unsloth crashes with 4.5.0

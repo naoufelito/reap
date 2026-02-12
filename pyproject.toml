@@ -28,6 +28,7 @@ dependencies = [
     "wandb>=0.21.1",
     "crfm-helm",
     "evalscope",
+    "kernels",
 ]
 
 [tool.uv.sources]
