@@ -90,7 +90,7 @@ def dump_args_to_yaml(
     logger.info(f"All arguments saved to {output_path}")
 
 
-def _save_as_mxfp4(model, tokenizer, save_dir, model_attrs):
+def _save_as_mxfp4(model, save_dir, model_attrs):
     """Save a BNB 4-bit pruned model in MXFP4 format for vLLM serving.
 
     Converts expert weights: BNB 4-bit -> bf16 -> MXFP4 (blocks + scales),
@@ -202,8 +202,6 @@ def _save_as_mxfp4(model, tokenizer, save_dir, model_attrs):
     with open(config_path, "w") as f:
         json.dump(cfg, f, indent=2)
 
-    # Save tokenizer
-    tokenizer.save_pretrained(save_dir)
     logger.info(f"MXFP4 model saved to {save_dir}")
 
 def prune(
@@ -363,7 +361,7 @@ def prune(
     pruned_model_dir.mkdir(parents=True, exist_ok=True)
     start = time.time()
     if _use_unsloth:
-        _save_as_mxfp4(model, tokenizer, pruned_model_dir, model_attrs)
+        _save_as_mxfp4(model, pruned_model_dir, model_attrs)
     else:
         model.save_pretrained(pruned_model_dir)
     end = time.time()
