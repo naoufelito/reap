@@ -326,6 +326,7 @@ def prune(
                     moe.experts.down_proj_bias.data = moe.experts.down_proj_bias[
                         retained_expert_indicies
                     ]
+            moe.num_experts = len(retained_expert_indicies)
             moe.experts.num_experts = len(retained_expert_indicies)
             # prune router
             router = getattr(moe, model_attrs["router"])
